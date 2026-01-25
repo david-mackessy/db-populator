@@ -23,13 +23,15 @@ public class DataGeneratorService {
     private static final Logger log = LoggerFactory.getLogger(DataGeneratorService.class);
 
     private final DataSource dataSource;
+    private final PrimaryKeyGeneratorService pkGenerator;
     private final Map<String, Set<Object>> uniqueValuesTracker = new ConcurrentHashMap<>();
     private final Map<String, List<Object>> foreignKeyCache = new ConcurrentHashMap<>();
 
     private static final String CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-    public DataGeneratorService(DataSource dataSource) {
+    public DataGeneratorService(DataSource dataSource, PrimaryKeyGeneratorService pkGenerator) {
         this.dataSource = dataSource;
+        this.pkGenerator = pkGenerator;
     }
 
     public Map<String, Object> generateRow(TableMetadata table) {
@@ -50,6 +52,17 @@ public class DataGeneratorService {
     }
 
     public Object generateValue(ColumnMetadata column, String tableName) {
+        // Primary key columns get unique sequential IDs
+        if (column.isPrimaryKey() && !column.isAutoIncrement()) {
+            return pkGenerator.getNextId(tableName, column.name());
+        }
+
+        // Special handling for datadimensiontype column - always use DISAGGREGATION
+        // (This is a DHIS2 enum column, must be checked before FK/type-based generation)
+        if ("datadimensiontype".equalsIgnoreCase(column.name())) {
+            return "DISAGGREGATION";
+        }
+
         if (column.isForeignKey()) {
             return generateForeignKeyValue(column);
         }

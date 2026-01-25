@@ -35,13 +35,14 @@ public record TableMetadata(
 
     public List<ColumnMetadata> getInsertableColumns() {
         return columns.stream()
-            .filter(col -> !col.isPrimaryKey())
             .filter(col -> !col.isAutoIncrement())
             .filter(col -> !col.isGenerated())
             .filter(col -> !col.nullable()
                 || col.name().equalsIgnoreCase("uid")
                 || col.name().equalsIgnoreCase("created")
-                || isBooleanColumn(col))
+                || col.name().equalsIgnoreCase("datadimensiontype")
+                || isBooleanColumn(col)
+                || col.isPrimaryKey())  // Include non-auto PK columns (we generate the values)
             .collect(Collectors.toList());
     }
 

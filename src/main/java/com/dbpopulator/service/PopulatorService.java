@@ -45,6 +45,8 @@ public class PopulatorService {
         }
     }
 
+    private static final int MAX_OPTION_COMBINATIONS = 500;
+
     private PopulateJob startCategoryModelJob(PopulateRequest request) {
         int combos = request.categoryCombos() != null ? request.categoryCombos() : 0;
         int catsPerCombo = request.categoriesPerCombo() != null ? request.categoriesPerCombo() : 0;
@@ -53,6 +55,17 @@ public class PopulatorService {
         if (combos <= 0 || catsPerCombo <= 0 || optsPerCat <= 0) {
             throw new IllegalArgumentException(
                 "Category model requires categoryCombos, categoriesPerCombo, and categoryOptionsPerCategory > 0");
+        }
+
+        // Validate that option combinations don't exceed the limit
+        // Formula: optionsPerCategory ^ categoriesPerCombo
+        long optionCombinations = (long) Math.pow(optsPerCat, catsPerCombo);
+        if (optionCombinations > MAX_OPTION_COMBINATIONS) {
+            throw new IllegalArgumentException(String.format(
+                "Option combinations (%d) exceeds maximum allowed (%d). " +
+                "%d categories with %d options each results in %d^%d = %d combinations.",
+                optionCombinations, MAX_OPTION_COMBINATIONS,
+                catsPerCombo, optsPerCat, optsPerCat, catsPerCombo, optionCombinations));
         }
 
         int totalExpected = request.getTotalCategoryModelCount();

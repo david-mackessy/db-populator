@@ -208,8 +208,13 @@ public class HierarchyInsertService {
                                       int hierarchyLevel, boolean isOrgUnit, int count) throws SQLException {
         List<InsertedRow> insertedRows = new ArrayList<>();
         List<String> batchPaths = new ArrayList<>();
+        // Track self-generated PKs when column is not auto-increment
+        boolean selfGeneratedPk = pkColumn != null && !pkColumn.isAutoIncrement();
+        List<Object> batchPkValues = selfGeneratedPk ? new ArrayList<>() : null;
 
-        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (PreparedStatement ps = selfGeneratedPk
+                ? conn.prepareStatement(sql)
+                : conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             for (int i = 0; i < count; i++) {
                 Map<String, Object> row = dataGenerator.generateRow(table);
 
@@ -230,6 +235,12 @@ public class HierarchyInsertService {
                     batchPaths.add(currentPath);
                 }
 
+                // Capture self-generated PK value before inserting
+                if (selfGeneratedPk) {
+                    Object pkValue = row.get(pkColumn.name());
+                    batchPkValues.add(pkValue);
+                }
+
                 setParameters(ps, columns, row);
                 ps.addBatch();
 
@@ -237,15 +248,26 @@ public class HierarchyInsertService {
                     int batchStartIndex = insertedRows.size();
                     ps.executeBatch();
 
-                    try (ResultSet keys = ps.getGeneratedKeys()) {
-                        int idx = 0;
-                        while (keys.next()) {
-                            Object id = keys.getObject(1);
+                    if (selfGeneratedPk) {
+                        // Use self-generated PK values
+                        for (int idx = 0; idx < batchPkValues.size(); idx++) {
+                            Object id = batchPkValues.get(idx);
                             String path = isOrgUnit ? batchPaths.get(batchStartIndex + idx) : null;
                             insertedRows.add(new InsertedRow(id, path));
-                            idx++;
                         }
-                        log.debug("Captured {} generated keys from batch", idx);
+                        log.debug("Captured {} self-generated keys from batch", batchPkValues.size());
+                        batchPkValues.clear();
+                    } else {
+                        try (ResultSet keys = ps.getGeneratedKeys()) {
+                            int idx = 0;
+                            while (keys.next()) {
+                                Object id = keys.getObject(1);
+                                String path = isOrgUnit ? batchPaths.get(batchStartIndex + idx) : null;
+                                insertedRows.add(new InsertedRow(id, path));
+                                idx++;
+                            }
+                            log.debug("Captured {} generated keys from batch", idx);
+                        }
                     }
 
                     ps.clearBatch();

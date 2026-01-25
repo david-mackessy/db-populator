@@ -55,6 +55,8 @@ public class BatchInsertService {
 
         ColumnMetadata pkColumn = table.getPrimaryKeyColumn();
         boolean returnGeneratedKeys = pkColumn != null && pkColumn.isAutoIncrement();
+        // Track if we're generating PKs ourselves (non-auto-increment PK)
+        boolean selfGeneratedPk = pkColumn != null && !pkColumn.isAutoIncrement();
 
         int totalInserted = 0;
 
@@ -66,10 +68,20 @@ public class BatchInsertService {
                     ? conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)
                     : conn.prepareStatement(sql)) {
 
+                List<Object> batchPkValues = selfGeneratedPk ? new ArrayList<>() : null;
+
                 for (int i = 0; i < count; i++) {
                     Map<String, Object> row = dataGenerator.generateRow(table);
                     setParameters(ps, insertableColumns, row);
                     ps.addBatch();
+
+                    // Cache the PK value we generated for FK references
+                    if (selfGeneratedPk && pkColumn != null) {
+                        Object pkValue = row.get(pkColumn.name());
+                        if (pkValue != null) {
+                            batchPkValues.add(pkValue);
+                        }
+                    }
 
                     if ((i + 1) % batchSize == 0 || i == count - 1) {
                         int[] results = ps.executeBatch();
@@ -78,6 +90,12 @@ public class BatchInsertService {
 
                         if (returnGeneratedKeys && pkColumn != null) {
                             cacheGeneratedKeys(ps, table, pkColumn);
+                        } else if (selfGeneratedPk && batchPkValues != null) {
+                            // Cache our self-generated PKs for FK references
+                            for (Object pkValue : batchPkValues) {
+                                dataGenerator.updateForeignKeyCache(table.tableName(), pkColumn.name(), pkValue);
+                            }
+                            batchPkValues.clear();
                         }
 
                         conn.commit();

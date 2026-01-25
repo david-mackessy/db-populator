@@ -3,3 +3,6 @@
 .mvn
 mvnw
 mvnw.cmd
+target
+/target/**
+/target/

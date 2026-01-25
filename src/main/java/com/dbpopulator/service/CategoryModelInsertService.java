@@ -180,22 +180,43 @@ public class CategoryModelInsertService {
             throw new IllegalArgumentException("Table not found: " + tableName);
         }
 
+        ColumnMetadata pk = table.getPrimaryKeyColumn();
+        boolean selfGeneratedPk = pk != null && !pk.isAutoIncrement();
+
         List<ColumnMetadata> insertableColumns = table.getInsertableColumns();
         String sql = buildInsertSql(tableName, insertableColumns);
         List<Long> insertedIds = new ArrayList<>();
+        List<Long> batchPkValues = selfGeneratedPk ? new ArrayList<>() : null;
 
-        try (PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+        try (PreparedStatement ps = selfGeneratedPk
+                ? conn.prepareStatement(sql)
+                : conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             for (int i = 0; i < count; i++) {
                 Map<String, Object> row = dataGenerator.generateRow(table);
+
+                // Capture self-generated PK value before inserting
+                if (selfGeneratedPk && pk != null) {
+                    Object pkValue = row.get(pk.name());
+                    if (pkValue instanceof Number num) {
+                        batchPkValues.add(num.longValue());
+                    }
+                }
+
                 setParameters(ps, insertableColumns, row);
                 ps.addBatch();
 
                 if ((i + 1) % 1000 == 0 || i == count - 1) {
                     ps.executeBatch();
 
-                    try (ResultSet keys = ps.getGeneratedKeys()) {
-                        while (keys.next()) {
-                            insertedIds.add(keys.getLong(1));
+                    if (selfGeneratedPk) {
+                        // Use self-generated PK values
+                        insertedIds.addAll(batchPkValues);
+                        batchPkValues.clear();
+                    } else {
+                        try (ResultSet keys = ps.getGeneratedKeys()) {
+                            while (keys.next()) {
+                                insertedIds.add(keys.getLong(1));
+                            }
                         }
                     }
                     ps.clearBatch();
@@ -204,7 +225,6 @@ public class CategoryModelInsertService {
         }
 
         // Update FK cache for the inserted entities
-        ColumnMetadata pk = table.getPrimaryKeyColumn();
         if (pk != null) {
             for (Long id : insertedIds) {
                 dataGenerator.updateForeignKeyCache(tableName, pk.name(), id);

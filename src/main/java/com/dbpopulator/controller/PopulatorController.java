@@ -48,15 +48,20 @@ public class PopulatorController {
                 return ResponseEntity.badRequest().build();
             }
 
-            PopulateJob job = populatorService.startPopulateJob(request);
+            try {
+                PopulateJob job = populatorService.startPopulateJob(request);
 
-            String statusUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/api/status/{jobId}")
-                .buildAndExpand(job.getJobId())
-                .toUriString();
+                String statusUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+                    .path("/api/status/{jobId}")
+                    .buildAndExpand(job.getJobId())
+                    .toUriString();
 
-            return ResponseEntity.accepted()
-                .body(new PopulateResponse(job.getJobId(), statusUrl));
+                return ResponseEntity.accepted()
+                    .body(new PopulateResponse(job.getJobId(), statusUrl));
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest()
+                    .body(new PopulateResponse(null, null, e.getMessage()));
+            }
         }
 
         String tableName = request.type();
