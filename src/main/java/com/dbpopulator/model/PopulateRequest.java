@@ -1,6 +1,7 @@
 package com.dbpopulator.model;
 
 import java.util.List;
+import java.util.Set;
 
 public record PopulateRequest(
     String type,
@@ -9,7 +10,13 @@ public record PopulateRequest(
     Long orgunitgroupid,
     Integer categoryCombos,
     Integer categoriesPerCombo,
-    Integer categoryOptionsPerCategory
+    Integer categoryOptionsPerCategory,
+    List<Long> categories,
+    List<Long> categoryComboIds,
+    String valueType,
+    String domainType,
+    String aggregationType,
+    List<Long> periodTypeIds
 ) {
     public boolean hasHierarchy() {
         return hierarchy != null && !hierarchy.isEmpty();
@@ -17,6 +24,65 @@ public record PopulateRequest(
 
     public boolean isCategoryModel() {
         return "categorymodel".equalsIgnoreCase(type);
+    }
+
+    public boolean isCategoryDimension() {
+        return "categorydimension".equalsIgnoreCase(type);
+    }
+
+    public boolean hasCategories() {
+        return categories != null && !categories.isEmpty();
+    }
+
+    public boolean isDataElement() {
+        return "dataelement".equalsIgnoreCase(type);
+    }
+
+    public boolean hasCategoryComboIds() {
+        return categoryComboIds != null && !categoryComboIds.isEmpty();
+    }
+
+    public boolean isDataSet() {
+        return "dataset".equalsIgnoreCase(type);
+    }
+
+    public boolean isDataSetElement() {
+        return "datasetelement".equalsIgnoreCase(type);
+    }
+
+    public boolean hasPeriodTypeIds() {
+        return periodTypeIds != null && !periodTypeIds.isEmpty();
+    }
+
+    private static final Set<String> VALID_VALUE_TYPES = Set.of("TEXT", "NUMBER");
+    private static final Set<String> VALID_DOMAIN_TYPES = Set.of("AGGREGATE", "TRACKER");
+    private static final Set<String> VALID_AGGREGATION_TYPES = Set.of("SUM", "AVERAGE", "NONE", "DEFAULT");
+
+    public String resolvedValueType() {
+        if (valueType == null || valueType.isBlank()) return "TEXT";
+        String upper = valueType.toUpperCase();
+        if (!VALID_VALUE_TYPES.contains(upper)) {
+            throw new IllegalArgumentException("Invalid valueType '" + valueType + "'. Allowed: " + VALID_VALUE_TYPES);
+        }
+        return upper;
+    }
+
+    public String resolvedDomainType() {
+        if (domainType == null || domainType.isBlank()) return "AGGREGATE";
+        String upper = domainType.toUpperCase();
+        if (!VALID_DOMAIN_TYPES.contains(upper)) {
+            throw new IllegalArgumentException("Invalid domainType '" + domainType + "'. Allowed: " + VALID_DOMAIN_TYPES);
+        }
+        return upper;
+    }
+
+    public String resolvedAggregationType() {
+        if (aggregationType == null || aggregationType.isBlank()) return "DEFAULT";
+        String upper = aggregationType.toUpperCase();
+        if (!VALID_AGGREGATION_TYPES.contains(upper)) {
+            throw new IllegalArgumentException("Invalid aggregationType '" + aggregationType + "'. Allowed: " + VALID_AGGREGATION_TYPES);
+        }
+        return upper;
     }
 
     public int getTotalHierarchyCount() {

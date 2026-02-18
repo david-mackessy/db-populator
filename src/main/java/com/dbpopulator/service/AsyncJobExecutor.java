@@ -19,6 +19,10 @@ public class AsyncJobExecutor {
     private final DataGeneratorService dataGeneratorService;
     private final HierarchyInsertService hierarchyInsertService;
     private final CategoryModelInsertService categoryModelInsertService;
+    private final CategoryDimensionInsertService categoryDimensionInsertService;
+    private final DataElementInsertService dataElementInsertService;
+    private final DataSetInsertService dataSetInsertService;
+    private final DataSetElementInsertService dataSetElementInsertService;
     private final JobTracker jobTracker;
 
     public AsyncJobExecutor(DependencyResolver dependencyResolver,
@@ -26,12 +30,20 @@ public class AsyncJobExecutor {
                             DataGeneratorService dataGeneratorService,
                             HierarchyInsertService hierarchyInsertService,
                             CategoryModelInsertService categoryModelInsertService,
+                            CategoryDimensionInsertService categoryDimensionInsertService,
+                            DataElementInsertService dataElementInsertService,
+                            DataSetInsertService dataSetInsertService,
+                            DataSetElementInsertService dataSetElementInsertService,
                             JobTracker jobTracker) {
         this.dependencyResolver = dependencyResolver;
         this.batchInsertService = batchInsertService;
         this.dataGeneratorService = dataGeneratorService;
         this.hierarchyInsertService = hierarchyInsertService;
         this.categoryModelInsertService = categoryModelInsertService;
+        this.categoryDimensionInsertService = categoryDimensionInsertService;
+        this.dataElementInsertService = dataElementInsertService;
+        this.dataSetInsertService = dataSetInsertService;
+        this.dataSetElementInsertService = dataSetElementInsertService;
         this.jobTracker = jobTracker;
     }
 
@@ -156,6 +168,113 @@ public class AsyncJobExecutor {
             jobTracker.updateTableProgress(jobId, "categorymodel", inserted);
             jobTracker.markCompleted(jobId);
             log.info("Job {} completed successfully: {} entity rows inserted in category model",
+                jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeDataElementJobAsync(String jobId, int amount, List<Long> categoryComboIds,
+                                            String valueType, String domainType, String aggregationType) {
+        log.info("Starting async dataelement job {} with {} rows and {} categorycomboid values",
+            jobId, amount, categoryComboIds.size());
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "dataelement", amount, false);
+
+        try {
+            int inserted = dataElementInsertService.insertDataElements(amount, categoryComboIds,
+                valueType, domainType, aggregationType,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "dataelement", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "dataelement", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in dataelement",
+                jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeDataSetJobAsync(String jobId, int amount, List<Long> categoryComboIds, List<Long> periodTypeIds) {
+        log.info("Starting async dataset job {} with {} rows, {} categorycomboid values, {} periodTypeIds",
+            jobId, amount, categoryComboIds.size(), periodTypeIds.size());
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "dataset", amount, false);
+
+        try {
+            int inserted = dataSetInsertService.insertDataSets(amount, categoryComboIds, periodTypeIds,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "dataset", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "dataset", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in dataset",
+                jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeDataSetElementJobAsync(String jobId, int amount, List<Long> categoryComboIds) {
+        int totalExpected = amount * 3;
+        log.info("Starting async datasetelement job {} with {} dataelements + {} datasets + {} join rows",
+            jobId, amount, amount, amount);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "datasetelement", totalExpected, false);
+
+        try {
+            int inserted = dataSetElementInsertService.insertDataSetElements(amount, categoryComboIds,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "datasetelement", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "datasetelement", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} total rows inserted for datasetelement",
+                jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeCategoryDimensionJobAsync(String jobId, int amount, List<Long> categoryIds) {
+        log.info("Starting async category dimension job {} with {} rows and {} category IDs",
+            jobId, amount, categoryIds.size());
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "categorydimension", amount, false);
+
+        try {
+            int inserted = categoryDimensionInsertService.insertCategoryDimensions(amount, categoryIds,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "categorydimension", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "categorydimension", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in categorydimension",
                 jobId, inserted);
 
         } catch (IllegalArgumentException e) {

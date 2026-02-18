@@ -6,3 +6,5 @@ mvnw.cmd
 target
 /target/**
 /target/
+
+.DS_Store
