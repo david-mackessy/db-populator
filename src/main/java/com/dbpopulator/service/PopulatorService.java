@@ -35,6 +35,10 @@ public class PopulatorService {
             return startCategoryDimensionJob(request);
         }
 
+        if (request.isProgram()) {
+            return startProgramJob(request);
+        }
+
         if (request.isDataSetElement()) {
             return startDataSetElementJob(request);
         }
@@ -112,6 +116,29 @@ public class PopulatorService {
         log.info("Created category model populate job {}", job.getJobId());
 
         asyncJobExecutor.executeCategoryModelJobAsync(job.getJobId(), combos, catsPerCombo, optsPerCat);
+
+        return job;
+    }
+
+    private PopulateJob startProgramJob(PopulateRequest request) {
+        if (!request.hasCategoryComboIds()) {
+            throw new IllegalArgumentException("Program requires a non-empty 'categoryComboIds' array");
+        }
+
+        if (request.amount() <= 0) {
+            throw new IllegalArgumentException("Program requires 'amount' > 0");
+        }
+
+        String programType = request.resolvedProgramType();
+
+        log.info("Received program populate request: {} rows with {} categorycomboid values, programType={}",
+            request.amount(), request.categoryComboIds().size(), programType);
+
+        PopulateJob job = jobTracker.createJob("program", request.amount());
+        log.info("Created program populate job {}", job.getJobId());
+
+        asyncJobExecutor.executeProgramJobAsync(job.getJobId(), request.amount(),
+            request.categoryComboIds(), programType);
 
         return job;
     }

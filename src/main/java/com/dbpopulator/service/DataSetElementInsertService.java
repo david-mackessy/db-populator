@@ -88,7 +88,7 @@ public class DataSetElementInsertService {
 
                 // Step 4: Insert datasetelement join table entries (1:1 mapping)
                 log.info("Inserting {} datasetelement join entries", amount);
-                int joinCount = insertDataSetElementJoinEntries(dataElementIds, dataSetIds);
+                int joinCount = insertDataSetElementJoinEntries(dataElementIds, dataSetIds, categoryComboIds);
                 totalInserted += joinCount;
                 if (callback != null) {
                     callback.onProgress(totalInserted);
@@ -182,7 +182,8 @@ public class DataSetElementInsertService {
         return insertedIds;
     }
 
-    private int insertDataSetElementJoinEntries(List<Long> dataElementIds, List<Long> dataSetIds) throws SQLException {
+    private int insertDataSetElementJoinEntries(List<Long> dataElementIds, List<Long> dataSetIds,
+                                                    List<Long> categoryComboIds) throws SQLException {
         TableMetadata joinTable = schemaService.getTable("datasetelement");
         if (joinTable == null) {
             throw new IllegalArgumentException("Join table not found: datasetelement");
@@ -191,13 +192,19 @@ public class DataSetElementInsertService {
         // Find FK columns dynamically by inspecting referencedTable
         String dataElementFkCol = null;
         String dataSetFkCol = null;
+        String categoryComboFkCol = null;
+        String pkCol = null;
 
         for (ColumnMetadata col : joinTable.columns()) {
-            if (col.isForeignKey()) {
+            if (col.isPrimaryKey()) {
+                pkCol = col.name();
+            } else if (col.isForeignKey()) {
                 if ("dataelement".equalsIgnoreCase(col.referencedTable())) {
                     dataElementFkCol = col.name();
                 } else if ("dataset".equalsIgnoreCase(col.referencedTable())) {
                     dataSetFkCol = col.name();
+                } else if ("categorycombo".equalsIgnoreCase(col.referencedTable())) {
+                    categoryComboFkCol = col.name();
                 }
             }
         }
@@ -205,18 +212,36 @@ public class DataSetElementInsertService {
         if (dataElementFkCol == null || dataSetFkCol == null) {
             throw new IllegalArgumentException("Cannot determine FK columns for datasetelement join table");
         }
+        if (pkCol == null) {
+            throw new IllegalArgumentException("Cannot determine PK column for datasetelement join table");
+        }
 
-        String sql = String.format("INSERT INTO datasetelement (%s, %s) VALUES (?, ?)",
-            dataSetFkCol, dataElementFkCol);
+        String sql;
+        boolean hasCatCombo = categoryComboFkCol != null;
+        if (hasCatCombo) {
+            sql = String.format("INSERT INTO datasetelement (%s, %s, %s, %s) VALUES (?, ?, ?, ?)",
+                pkCol, dataSetFkCol, dataElementFkCol, categoryComboFkCol);
+        } else {
+            sql = String.format("INSERT INTO datasetelement (%s, %s, %s) VALUES (?, ?, ?)",
+                pkCol, dataSetFkCol, dataElementFkCol);
+        }
 
         int inserted = 0;
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
 
+            long nextPk = getMaxPkValue(conn, "datasetelement", pkCol) + 1;
+
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 for (int i = 0; i < dataElementIds.size(); i++) {
-                    ps.setLong(1, dataSetIds.get(i));
-                    ps.setLong(2, dataElementIds.get(i));
+                    ps.setLong(1, nextPk + i);
+                    ps.setLong(2, dataSetIds.get(i));
+                    ps.setLong(3, dataElementIds.get(i));
+                    if (hasCatCombo) {
+                        long selectedComboId = categoryComboIds.get(
+                            ThreadLocalRandom.current().nextInt(categoryComboIds.size()));
+                        ps.setLong(4, selectedComboId);
+                    }
                     ps.addBatch();
                     inserted++;
 
@@ -238,6 +263,14 @@ public class DataSetElementInsertService {
         }
 
         return inserted;
+    }
+
+    private long getMaxPkValue(Connection conn, String table, String pkColumn) throws SQLException {
+        String sql = "SELECT COALESCE(MAX(" + pkColumn + "), 0) FROM " + table;
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getLong(1) : 0;
+        }
     }
 
     private List<ColumnMetadata> getInsertableColumnsWithExtras(TableMetadata table) {

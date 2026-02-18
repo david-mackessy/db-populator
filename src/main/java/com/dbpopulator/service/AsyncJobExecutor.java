@@ -23,6 +23,7 @@ public class AsyncJobExecutor {
     private final DataElementInsertService dataElementInsertService;
     private final DataSetInsertService dataSetInsertService;
     private final DataSetElementInsertService dataSetElementInsertService;
+    private final ProgramInsertService programInsertService;
     private final JobTracker jobTracker;
 
     public AsyncJobExecutor(DependencyResolver dependencyResolver,
@@ -34,6 +35,7 @@ public class AsyncJobExecutor {
                             DataElementInsertService dataElementInsertService,
                             DataSetInsertService dataSetInsertService,
                             DataSetElementInsertService dataSetElementInsertService,
+                            ProgramInsertService programInsertService,
                             JobTracker jobTracker) {
         this.dependencyResolver = dependencyResolver;
         this.batchInsertService = batchInsertService;
@@ -44,6 +46,7 @@ public class AsyncJobExecutor {
         this.dataElementInsertService = dataElementInsertService;
         this.dataSetInsertService = dataSetInsertService;
         this.dataSetElementInsertService = dataSetElementInsertService;
+        this.programInsertService = programInsertService;
         this.jobTracker = jobTracker;
     }
 
@@ -222,6 +225,32 @@ public class AsyncJobExecutor {
             jobTracker.updateTableProgress(jobId, "dataset", inserted);
             jobTracker.markCompleted(jobId);
             log.info("Job {} completed successfully: {} rows inserted in dataset",
+                jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeProgramJobAsync(String jobId, int amount, List<Long> categoryComboIds, String programType) {
+        log.info("Starting async program job {} with {} rows, {} categorycomboid values, programType={}",
+            jobId, amount, categoryComboIds.size(), programType);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "program", amount, false);
+
+        try {
+            int inserted = programInsertService.insertPrograms(amount, categoryComboIds, programType,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "program", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "program", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in program",
                 jobId, inserted);
 
         } catch (IllegalArgumentException e) {

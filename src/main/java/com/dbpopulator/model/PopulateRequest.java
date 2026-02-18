@@ -16,7 +16,8 @@ public record PopulateRequest(
     String valueType,
     String domainType,
     String aggregationType,
-    List<Long> periodTypeIds
+    List<Long> periodTypeIds,
+    String programType
 ) {
     public boolean hasHierarchy() {
         return hierarchy != null && !hierarchy.isEmpty();
@@ -52,6 +53,21 @@ public record PopulateRequest(
 
     public boolean hasPeriodTypeIds() {
         return periodTypeIds != null && !periodTypeIds.isEmpty();
+    }
+
+    public boolean isProgram() {
+        return "program".equalsIgnoreCase(type);
+    }
+
+    private static final Set<String> VALID_PROGRAM_TYPES = Set.of("WITH_REGISTRATION", "WITHOUT_REGISTRATION");
+
+    public String resolvedProgramType() {
+        if (programType == null || programType.isBlank()) return "WITHOUT_REGISTRATION";
+        String upper = programType.toUpperCase();
+        if (!VALID_PROGRAM_TYPES.contains(upper)) {
+            throw new IllegalArgumentException("Invalid programType '" + programType + "'. Allowed: " + VALID_PROGRAM_TYPES);
+        }
+        return upper;
     }
 
     private static final Set<String> VALID_VALUE_TYPES = Set.of("TEXT", "NUMBER");
