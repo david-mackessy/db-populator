@@ -48,6 +48,28 @@ public class DataGeneratorService {
             }
         }
 
+        // shortname must match name — find the name key case-insensitively and copy it
+        String nameKey = null;
+        String shortNameKey = null;
+        for (String key : row.keySet()) {
+            if ("name".equalsIgnoreCase(key)) nameKey = key;
+            if ("shortname".equalsIgnoreCase(key)) shortNameKey = key;
+        }
+        if (shortNameKey != null && nameKey != null) {
+            row.put(shortNameKey, row.get(nameKey));
+        }
+
+        // General rule: boolean columns always default to false
+        for (ColumnMetadata column : table.getInsertableColumns()) {
+            if (row.get(column.name()) == null) {
+                int sqlType = column.sqlType();
+                String dataType = column.dataType().toLowerCase();
+                if (sqlType == java.sql.Types.BOOLEAN || sqlType == java.sql.Types.BIT || dataType.contains("bool")) {
+                    row.put(column.name(), false);
+                }
+            }
+        }
+
         return row;
     }
 
@@ -57,10 +79,12 @@ public class DataGeneratorService {
             return pkGenerator.getNextId(tableName, column.name());
         }
 
-        // Special handling for datadimensiontype column - always use DISAGGREGATION
-        // (This is a DHIS2 enum column, must be checked before FK/type-based generation)
+        // Special handling for DHIS2 enum columns - must be checked before FK/type-based generation
         if ("datadimensiontype".equalsIgnoreCase(column.name())) {
             return "DISAGGREGATION";
+        }
+        if ("programtype".equalsIgnoreCase(column.name()) || "type".equalsIgnoreCase(column.name())) {
+            return "WITHOUT_REGISTRATION";
         }
 
         if (column.isForeignKey()) {
@@ -72,9 +96,14 @@ public class DataGeneratorService {
             return generateUid();
         }
 
-        // Special handling for 'created' columns - use current timestamp
-        if ("created".equalsIgnoreCase(column.name())) {
+        // Special handling for 'created'/'lastupdated' columns - use current timestamp
+        if ("created".equalsIgnoreCase(column.name()) || "lastupdated".equalsIgnoreCase(column.name())) {
             return new Timestamp(System.currentTimeMillis());
+        }
+
+        // Boolean columns with app-level non-null constraints default to false
+        if ("enablechangelog".equalsIgnoreCase(column.name())) {
+            return false;
         }
 
         return generateValueByType(column, tableName);

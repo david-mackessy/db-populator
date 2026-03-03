@@ -9,6 +9,8 @@ import com.dbpopulator.model.TableInfo;
 import com.dbpopulator.model.TableMetadata;
 import com.dbpopulator.service.PopulatorService;
 import com.dbpopulator.service.SchemaDetectionService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +23,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class PopulatorController {
+
+    private static final Logger log = LoggerFactory.getLogger(PopulatorController.class);
 
     private final PopulatorService populatorService;
     private final JobTracker jobTracker;
@@ -36,60 +40,68 @@ public class PopulatorController {
 
     @PostMapping("/populate")
     public ResponseEntity<PopulateResponse> populate(@RequestBody PopulateRequest request) {
+        log.info("Received populate request: type={}", request.type());
+
         if (request.type() == null || request.type().isBlank()) {
-            return ResponseEntity.badRequest().build();
+            log.warn("Populate request rejected: missing 'type' field");
+            return badRequest("Missing required field: 'type'");
         }
 
-        // Handle category model requests separately
-        if (request.isCategoryModel()) {
-            if (request.categoryCombos() == null || request.categoryCombos() <= 0 ||
-                request.categoriesPerCombo() == null || request.categoriesPerCombo() <= 0 ||
-                request.categoryOptionsPerCategory() == null || request.categoryOptionsPerCategory() <= 0) {
-                return ResponseEntity.badRequest().build();
+        // Specialized types manage their own validation in the service layer.
+        // They do not require 'amount' or an existing table in the schema.
+        boolean isSpecializedType = request.isCategoryModel()
+            || request.isCategoryDimension()
+            || request.isDataElement()
+            || request.isDataSet()
+            || request.isDataSetElement()
+            || request.isProgram()
+            || request.isProgramIndicator()
+            || request.isDataApprovalWorkflow()
+            || request.isUserRole()
+            || request.isUserGroup()
+            || request.isUserInfo()
+            || request.isOrgUnitGroup()
+            || request.isChain();
+
+        if (!isSpecializedType) {
+            // Generic flat/hierarchy inserts require amount and a real table
+            if (request.hasHierarchy() && !"organisationunit".equalsIgnoreCase(request.type())) {
+                log.warn("Populate request rejected: hierarchy is only supported for 'organisationunit', got '{}'", request.type());
+                return badRequest("Hierarchy is only supported for type 'organisationunit'");
             }
 
-            try {
-                PopulateJob job = populatorService.startPopulateJob(request);
+            if (!request.hasHierarchy() && request.amount() <= 0) {
+                log.warn("Populate request rejected: 'amount' must be > 0 for type '{}'", request.type());
+                return badRequest("Field 'amount' must be > 0");
+            }
 
-                String statusUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
-                    .path("/api/status/{jobId}")
-                    .buildAndExpand(job.getJobId())
-                    .toUriString();
-
-                return ResponseEntity.accepted()
-                    .body(new PopulateResponse(job.getJobId(), statusUrl));
-            } catch (IllegalArgumentException e) {
-                return ResponseEntity.badRequest()
-                    .body(new PopulateResponse(null, null, e.getMessage()));
+            if (!schemaService.tableExists(request.type())) {
+                log.warn("Populate request rejected: table '{}' not found in schema", request.type());
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new PopulateResponse(null, null, "Table not found: " + request.type()));
             }
         }
 
-        String tableName = request.type();
+        try {
+            PopulateJob job = populatorService.startPopulateJob(request);
 
-        // Hierarchy is only valid for organisationunit
-        if (request.hasHierarchy() && !"organisationunit".equalsIgnoreCase(tableName)) {
-            return ResponseEntity.badRequest().build();
+            String statusUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/api/status/{jobId}")
+                .buildAndExpand(job.getJobId())
+                .toUriString();
+
+            log.info("Started populate job {} for type '{}'", job.getJobId(), request.type());
+            return ResponseEntity.accepted()
+                .body(new PopulateResponse(job.getJobId(), statusUrl));
+
+        } catch (IllegalArgumentException e) {
+            log.warn("Populate request rejected for type '{}': {}", request.type(), e.getMessage());
+            return badRequest(e.getMessage());
         }
+    }
 
-        // Either amount or hierarchy must be provided
-        if (!request.hasHierarchy() && request.amount() <= 0) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        if (!schemaService.tableExists(tableName)) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                .body(new PopulateResponse(null, null));
-        }
-
-        PopulateJob job = populatorService.startPopulateJob(request);
-
-        String statusUrl = ServletUriComponentsBuilder.fromCurrentContextPath()
-            .path("/api/status/{jobId}")
-            .buildAndExpand(job.getJobId())
-            .toUriString();
-
-        return ResponseEntity.accepted()
-            .body(new PopulateResponse(job.getJobId(), statusUrl));
+    private ResponseEntity<PopulateResponse> badRequest(String message) {
+        return ResponseEntity.badRequest().body(new PopulateResponse(null, null, message));
     }
 
     @GetMapping("/status/{jobId}")

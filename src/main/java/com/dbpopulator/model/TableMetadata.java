@@ -40,7 +40,11 @@ public record TableMetadata(
             .filter(col -> !col.nullable()
                 || col.name().equalsIgnoreCase("uid")
                 || col.name().equalsIgnoreCase("created")
+                || col.name().equalsIgnoreCase("lastupdated")
+                || col.name().equalsIgnoreCase("shortname")
                 || col.name().equalsIgnoreCase("datadimensiontype")
+                || col.name().equalsIgnoreCase("programtype")
+                || col.name().equalsIgnoreCase("type")
                 || isBooleanColumn(col)
                 || col.isPrimaryKey())  // Include non-auto PK columns (we generate the values)
             .collect(Collectors.toList());

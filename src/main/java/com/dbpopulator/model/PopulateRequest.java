@@ -17,8 +17,13 @@ public record PopulateRequest(
     String domainType,
     String aggregationType,
     List<Long> periodTypeIds,
-    String programType
+    String programType,
+    List<UserRoleEntry> userRoles,
+    Integer amountRoles,
+    Integer amountUserGroups,
+    List<PopulateRequest> requests
 ) {
+    public record UserRoleEntry(String role, String authority) {}
     public boolean hasHierarchy() {
         return hierarchy != null && !hierarchy.isEmpty();
     }
@@ -57,6 +62,42 @@ public record PopulateRequest(
 
     public boolean isProgram() {
         return "program".equalsIgnoreCase(type);
+    }
+
+    public boolean isProgramIndicator() {
+        return "programindicator".equalsIgnoreCase(type);
+    }
+
+    public boolean isDataApprovalWorkflow() {
+        return "dataapprovalworkflow".equalsIgnoreCase(type);
+    }
+
+    public boolean isUserRole() {
+        return "userrole".equalsIgnoreCase(type);
+    }
+
+    public boolean isUserGroup() {
+        return "usergroup".equalsIgnoreCase(type);
+    }
+
+    public boolean isUserInfo() {
+        return "userinfo".equalsIgnoreCase(type);
+    }
+
+    public boolean isOrgUnitGroup() {
+        return "orgunitgroup".equalsIgnoreCase(type);
+    }
+
+    public boolean isChain() {
+        return "chain".equalsIgnoreCase(type);
+    }
+
+    public boolean hasRequests() {
+        return requests != null && !requests.isEmpty();
+    }
+
+    public boolean hasUserRoles() {
+        return userRoles != null && !userRoles.isEmpty();
     }
 
     private static final Set<String> VALID_PROGRAM_TYPES = Set.of("WITH_REGISTRATION", "WITHOUT_REGISTRATION");

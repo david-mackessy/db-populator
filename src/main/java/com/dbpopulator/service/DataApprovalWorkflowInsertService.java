@@ -13,67 +13,41 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
-public class ProgramInsertService {
+public class DataApprovalWorkflowInsertService {
 
-    private static final Logger log = LoggerFactory.getLogger(ProgramInsertService.class);
+    private static final Logger log = LoggerFactory.getLogger(DataApprovalWorkflowInsertService.class);
     private static final int BATCH_SIZE = 1000;
 
-    // Nullable primitive columns that need explicit default values to avoid null exceptions
-    private static final Set<String> EXTRA_COLUMNS = Set.of(
-        "version", "maxteicounttoreturn", "minattributesrequiredtosearch",
-        "expirydays", "completeeventsexpirydays", "opendaysaftercoitheo",
-        "enrollmentdatelabel", "incidentdatelabel", "enablechangelog", "programtype", "type"
-    );
-
-    // Default values for primitive non-null columns
-    private static final Map<String, Object> PRIMITIVE_DEFAULTS = Map.ofEntries(
-        Map.entry("version", 1),
-        Map.entry("maxteicounttoreturn", 0),
-        Map.entry("minattributesrequiredtosearch", 1),
-        Map.entry("expirydays", 0),
-        Map.entry("completeeventsexpirydays", 0),
-        Map.entry("opendaysaftercoitheo", 0),
-        Map.entry("enablechangelog", false),
-        Map.entry("programtype", "WITHOUT_REGISTRATION"),
-        Map.entry("type", "WITHOUT_REGISTRATION")
-    );
+    // Force these nullable columns into the insert
+    private static final Set<String> EXTRA_COLUMNS = Set.of("periodtypeid", "categorycomboid");
 
     private final DataSource dataSource;
     private final DataGeneratorService dataGenerator;
     private final SchemaDetectionService schemaService;
 
-    public ProgramInsertService(DataSource dataSource,
-                                 DataGeneratorService dataGenerator,
-                                 SchemaDetectionService schemaService) {
+    public DataApprovalWorkflowInsertService(DataSource dataSource,
+                                              DataGeneratorService dataGenerator,
+                                              SchemaDetectionService schemaService) {
         this.dataSource = dataSource;
         this.dataGenerator = dataGenerator;
         this.schemaService = schemaService;
     }
 
-    public int insertPrograms(int amount, List<Long> categoryComboIds, String programType,
-                               ProgressCallback callback) throws SQLException {
-        log.info("Starting program insert: {} rows with {} categorycomboid values, programType={}",
-            amount, categoryComboIds.size(), programType);
+    public int insertDataApprovalWorkflows(int amount, List<Long> categoryComboIds,
+                                            ProgressCallback callback) throws SQLException {
+        log.info("Starting dataapprovalworkflow insert: {} rows with {} categoryComboId values",
+            amount, categoryComboIds.size());
 
-        if (categoryComboIds.isEmpty()) {
-            throw new IllegalArgumentException("categoryComboIds array cannot be empty");
-        }
-
-        TableMetadata table = schemaService.getTable("program");
+        TableMetadata table = schemaService.getTable("dataapprovalworkflow");
         if (table == null) {
-            throw new IllegalArgumentException("Table not found: program");
+            throw new IllegalArgumentException("Table not found: dataapprovalworkflow");
         }
 
-        List<ColumnMetadata> insertableColumns = getInsertableColumnsWithExtras(table);
-        String sql = buildInsertSql("program", insertableColumns);
-        log.info("Program insert SQL columns: {}", insertableColumns.stream()
-            .map(ColumnMetadata::name).collect(java.util.stream.Collectors.joining(", ")));
+        long periodTypeId = fetchOnePeriodTypeId();
+        log.info("Using periodtypeid={} for all dataapprovalworkflow inserts", periodTypeId);
 
-        // Build a set of column names present in insertableColumns for override safety
-        Set<String> columnNames = new HashSet<>();
-        for (ColumnMetadata col : insertableColumns) {
-            columnNames.add(col.name().toLowerCase());
-        }
+        List<ColumnMetadata> columns = getInsertableColumnsWithExtras(table);
+        String sql = buildInsertSql("dataapprovalworkflow", columns);
 
         int inserted = 0;
 
@@ -84,38 +58,13 @@ public class ProgramInsertService {
                 for (int i = 0; i < amount; i++) {
                     Map<String, Object> row = dataGenerator.generateRow(table);
 
-                    // Override categorycomboid and enrollmentcategorycomboid with random from provided list
-                    long selectedComboId = categoryComboIds.get(
+                    row.put("periodtypeid", periodTypeId);
+
+                    long comboId = categoryComboIds.get(
                         ThreadLocalRandom.current().nextInt(categoryComboIds.size()));
-                    row.put("categorycomboid", selectedComboId);
+                    row.put("categorycomboid", comboId);
 
-                    long selectedEnrollmentComboId = categoryComboIds.get(
-                        ThreadLocalRandom.current().nextInt(categoryComboIds.size()));
-                    row.put("enrollmentcategorycomboid", selectedEnrollmentComboId);
-
-                    // Override programtype
-                    row.put("programtype", programType);
-
-                    // Set defaults for all known primitive columns to avoid null exceptions
-                    for (Map.Entry<String, Object> entry : PRIMITIVE_DEFAULTS.entrySet()) {
-                        if (columnNames.contains(entry.getKey())) {
-                            row.putIfAbsent(entry.getKey(), entry.getValue());
-                        }
-                    }
-
-                    // Ensure any remaining integer/boolean columns in the insertable set have safe defaults
-                    for (ColumnMetadata col : insertableColumns) {
-                        String colName = col.name().toLowerCase();
-                        if (row.get(col.name()) == null) {
-                            switch (col.sqlType()) {
-                                case Types.INTEGER, Types.SMALLINT, Types.TINYINT -> row.put(col.name(), 0);
-                                case Types.BIGINT -> row.put(col.name(), 0L);
-                                case Types.BOOLEAN, Types.BIT -> row.put(col.name(), false);
-                            }
-                        }
-                    }
-
-                    setParameters(ps, insertableColumns, row);
+                    setParameters(ps, columns, row);
                     ps.addBatch();
 
                     if ((i + 1) % BATCH_SIZE == 0) {
@@ -130,7 +79,6 @@ public class ProgramInsertService {
                     }
                 }
 
-                // Execute remaining batch
                 if (amount % BATCH_SIZE != 0) {
                     ps.executeBatch();
                     conn.commit();
@@ -142,13 +90,25 @@ public class ProgramInsertService {
 
             } catch (SQLException e) {
                 conn.rollback();
-                log.error("Program insert failed, rolling back", e);
+                log.error("Dataapprovalworkflow insert failed, rolling back", e);
                 throw e;
             }
         }
 
-        log.info("Program insert complete: {} rows inserted", inserted);
+        log.info("Dataapprovalworkflow insert complete: {} rows inserted", inserted);
         return inserted;
+    }
+
+    private long fetchOnePeriodTypeId() throws SQLException {
+        String sql = "SELECT periodtypeid FROM periodtype LIMIT 1";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                return rs.getLong(1);
+            }
+            throw new IllegalStateException("No rows found in periodtype table");
+        }
     }
 
     private List<ColumnMetadata> getInsertableColumnsWithExtras(TableMetadata table) {
@@ -160,7 +120,8 @@ public class ProgramInsertService {
 
         List<ColumnMetadata> result = new ArrayList<>(base);
         for (ColumnMetadata col : table.columns()) {
-            if (EXTRA_COLUMNS.contains(col.name().toLowerCase()) && !alreadyIncluded.contains(col.name().toLowerCase())) {
+            if (EXTRA_COLUMNS.contains(col.name().toLowerCase())
+                    && !alreadyIncluded.contains(col.name().toLowerCase())) {
                 result.add(col);
             }
         }
@@ -190,12 +151,6 @@ public class ProgramInsertService {
         for (int i = 0; i < columns.size(); i++) {
             ColumnMetadata col = columns.get(i);
             Object value = row.get(col.name());
-            if (value == null && ("programtype".equalsIgnoreCase(col.name()) || "type".equalsIgnoreCase(col.name()))) {
-                value = "WITHOUT_REGISTRATION";
-            }
-            if (value == null && "enablechangelog".equalsIgnoreCase(col.name())) {
-                value = false;
-            }
             setParameter(ps, i + 1, value, col.sqlType());
         }
     }

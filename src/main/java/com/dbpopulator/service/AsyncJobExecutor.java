@@ -2,6 +2,7 @@ package com.dbpopulator.service;
 
 import com.dbpopulator.job.JobTracker;
 import com.dbpopulator.model.JobStatus;
+import com.dbpopulator.model.PopulateRequest.UserRoleEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -24,6 +25,13 @@ public class AsyncJobExecutor {
     private final DataSetInsertService dataSetInsertService;
     private final DataSetElementInsertService dataSetElementInsertService;
     private final ProgramInsertService programInsertService;
+    private final ProgramIndicatorInsertService programIndicatorInsertService;
+    private final DataApprovalWorkflowInsertService dataApprovalWorkflowInsertService;
+    private final UserRoleInsertService userRoleInsertService;
+    private final UserGroupInsertService userGroupInsertService;
+    private final UserInfoInsertService userInfoInsertService;
+    private final OrgUnitGroupInsertService orgUnitGroupInsertService;
+    private final ChainInsertService chainInsertService;
     private final JobTracker jobTracker;
 
     public AsyncJobExecutor(DependencyResolver dependencyResolver,
@@ -36,6 +44,13 @@ public class AsyncJobExecutor {
                             DataSetInsertService dataSetInsertService,
                             DataSetElementInsertService dataSetElementInsertService,
                             ProgramInsertService programInsertService,
+                            ProgramIndicatorInsertService programIndicatorInsertService,
+                            DataApprovalWorkflowInsertService dataApprovalWorkflowInsertService,
+                            UserRoleInsertService userRoleInsertService,
+                            UserGroupInsertService userGroupInsertService,
+                            UserInfoInsertService userInfoInsertService,
+                            OrgUnitGroupInsertService orgUnitGroupInsertService,
+                            ChainInsertService chainInsertService,
                             JobTracker jobTracker) {
         this.dependencyResolver = dependencyResolver;
         this.batchInsertService = batchInsertService;
@@ -47,6 +62,13 @@ public class AsyncJobExecutor {
         this.dataSetInsertService = dataSetInsertService;
         this.dataSetElementInsertService = dataSetElementInsertService;
         this.programInsertService = programInsertService;
+        this.programIndicatorInsertService = programIndicatorInsertService;
+        this.dataApprovalWorkflowInsertService = dataApprovalWorkflowInsertService;
+        this.userRoleInsertService = userRoleInsertService;
+        this.userGroupInsertService = userGroupInsertService;
+        this.userInfoInsertService = userInfoInsertService;
+        this.orgUnitGroupInsertService = orgUnitGroupInsertService;
+        this.chainInsertService = chainInsertService;
         this.jobTracker = jobTracker;
     }
 
@@ -124,9 +146,10 @@ public class AsyncJobExecutor {
         dataGeneratorService.clearForeignKeyCache();
 
         try {
-            int inserted = hierarchyInsertService.insertHierarchy(tableName, parentColumn, hierarchy,
-                orgunitgroupid,
+            HierarchyInsertService.HierarchyResult result = hierarchyInsertService.insertHierarchy(
+                tableName, parentColumn, hierarchy, orgunitgroupid,
                 (totalInserted) -> jobTracker.updateTableProgress(jobId, tableName, totalInserted));
+            int inserted = result.totalInserted();
 
             jobTracker.updateTableProgress(jobId, tableName, inserted);
             jobTracker.markCompleted(jobId);
@@ -279,6 +302,184 @@ public class AsyncJobExecutor {
             jobTracker.markCompleted(jobId);
             log.info("Job {} completed successfully: {} total rows inserted for datasetelement",
                 jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeDataApprovalWorkflowJobAsync(String jobId, int amount, List<Long> categoryComboIds) {
+        log.info("Starting async dataapprovalworkflow job {} with {} rows", jobId, amount);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "dataapprovalworkflow", amount, false);
+
+        try {
+            int inserted = dataApprovalWorkflowInsertService.insertDataApprovalWorkflows(amount, categoryComboIds,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "dataapprovalworkflow", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "dataapprovalworkflow", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in dataapprovalworkflow", jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeProgramIndicatorJobAsync(String jobId, int amount, List<Long> categoryComboIds) {
+        int totalExpected = 10 + amount; // 10 programs + amount indicators
+        log.info("Starting async programindicator job {} with 10 programs + {} indicators",
+            jobId, amount);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "programindicator", totalExpected, false);
+
+        try {
+            int inserted = programIndicatorInsertService.insertProgramIndicators(amount, categoryComboIds,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "programindicator", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "programindicator", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} total rows inserted for programindicator", jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeUserInfoJobAsync(String jobId, int amount, int amountRoles, int amountUserGroups) {
+        int totalExpected = amountRoles * 2 + amountUserGroups + amount * 3;
+        log.info("Starting async userinfo job {} — {} users, {} roles, {} groups ({} total rows)",
+            jobId, amount, amountRoles, amountUserGroups, totalExpected);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "userinfo", totalExpected, false);
+
+        try {
+            UserInfoInsertService.UserInsertResult result = userInfoInsertService.insertUsers(
+                amount, amountRoles, amountUserGroups,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "userinfo", totalInserted));
+            int inserted = result.totalInserted();
+
+            jobTracker.updateTableProgress(jobId, "userinfo", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} total rows inserted", jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeUserGroupJobAsync(String jobId, int amount) {
+        log.info("Starting async usergroup job {} with {} rows", jobId, amount);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "usergroup", amount, false);
+
+        try {
+            int inserted = userGroupInsertService.insertUserGroups(amount,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "usergroup", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "usergroup", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in usergroup", jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeUserRoleJobAsync(String jobId, List<UserRoleEntry> entries) {
+        int totalExpected = entries.size() * 2;
+        log.info("Starting async userrole job {} with {} role-authority pairs ({} total rows)",
+            jobId, entries.size(), totalExpected);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "userrole", totalExpected, false);
+
+        try {
+            int inserted = userRoleInsertService.insertUserRoles(entries,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "userrole", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "userrole", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} total rows inserted for userrole", jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeChainJobAsync(String jobId, List<com.dbpopulator.model.PopulateRequest> requests,
+                                     int totalExpected) {
+        log.info("Starting async chain job {} with {} sub-requests ({} total expected rows)",
+            jobId, requests.size(), totalExpected);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "chain", totalExpected, false);
+
+        try {
+            int inserted = chainInsertService.executeChain(requests,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "chain", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "chain", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Chain job {} completed successfully: {} total rows inserted", jobId, inserted);
+
+        } catch (IllegalArgumentException e) {
+            log.error("Chain job {} failed - invalid argument: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        } catch (Exception e) {
+            log.error("Chain job {} failed with unexpected error: {}", jobId, e.getMessage(), e);
+            jobTracker.markFailed(jobId, e.getMessage());
+        }
+    }
+
+    @Async("populatorExecutor")
+    public void executeOrgUnitGroupJobAsync(String jobId, int amount) {
+        log.info("Starting async orgunitgroup job {} with {} rows", jobId, amount);
+
+        jobTracker.updateJobStatus(jobId, JobStatus.Status.RUNNING);
+        jobTracker.registerTable(jobId, "orgunitgroup", amount, false);
+
+        try {
+            int inserted = orgUnitGroupInsertService.insertOrgUnitGroups(amount,
+                (totalInserted) -> jobTracker.updateTableProgress(jobId, "orgunitgroup", totalInserted));
+
+            jobTracker.updateTableProgress(jobId, "orgunitgroup", inserted);
+            jobTracker.markCompleted(jobId);
+            log.info("Job {} completed successfully: {} rows inserted in orgunitgroup", jobId, inserted);
 
         } catch (IllegalArgumentException e) {
             log.error("Job {} failed - invalid argument: {}", jobId, e.getMessage(), e);

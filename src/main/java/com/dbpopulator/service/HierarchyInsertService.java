@@ -31,8 +31,8 @@ public class HierarchyInsertService {
         this.schemaService = schemaService;
     }
 
-    public int insertHierarchy(String tableName, String parentColumn, List<Integer> hierarchy,
-                                Long orgunitgroupid, ProgressCallback callback) throws SQLException {
+    public HierarchyResult insertHierarchy(String tableName, String parentColumn, List<Integer> hierarchy,
+                                            Long orgunitgroupid, ProgressCallback callback) throws SQLException {
         TableMetadata table = schemaService.getTable(tableName);
         if (table == null) {
             throw new IllegalArgumentException("Table not found: " + tableName);
@@ -58,11 +58,12 @@ public class HierarchyInsertService {
             columnsToInsert.add(parentCol);
         }
 
-        // For organisationunit table, ensure path and hierarchylevel columns are included
+        // For organisationunit table, ensure path, hierarchylevel, and openingdate columns are included
         boolean isOrgUnit = tableName.equalsIgnoreCase("organisationunit");
         if (isOrgUnit) {
             addColumnIfMissing(columnsToInsert, table, "path");
             addColumnIfMissing(columnsToInsert, table, "hierarchylevel");
+            addColumnIfMissing(columnsToInsert, table, "openingdate");
         }
 
         String sql = buildInsertSql(tableName, columnsToInsert, pkColumn.name());
@@ -73,6 +74,8 @@ public class HierarchyInsertService {
         List<Object> allInsertedIds = new ArrayList<>();
         // Track id -> path mapping for organisationunit
         Map<Object, String> idToPath = new HashMap<>();
+        // Track ids per level for auto org unit group assignment
+        List<List<Object>> orgUnitsByLevel = new ArrayList<>();
 
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -125,6 +128,10 @@ public class HierarchyInsertService {
                     conn.commit();
                     log.info("Level {} complete: {} total inserted so far", level, totalInserted);
 
+                    if (isOrgUnit) {
+                        orgUnitsByLevel.add(new ArrayList<>(currentLevelIds));
+                    }
+
                     if (callback != null) {
                         callback.onProgress(totalInserted);
                     }
@@ -139,17 +146,19 @@ public class HierarchyInsertService {
 
         log.info("Hierarchy insert complete: {} total rows", totalInserted);
 
-        // If orgunitgroupid is provided, create group memberships
-        log.debug("Group membership check - isOrgUnit: {}, orgunitgroupid: {}, allInsertedIds size: {}",
-            isOrgUnit, orgunitgroupid, allInsertedIds.size());
-        if (isOrgUnit && orgunitgroupid != null && !allInsertedIds.isEmpty()) {
-            insertOrgUnitGroupMemberships(orgunitgroupid, allInsertedIds);
-        } else if (orgunitgroupid != null) {
-            log.warn("Skipping group membership insert - isOrgUnit: {}, allInsertedIds empty: {}",
-                isOrgUnit, allInsertedIds.isEmpty());
+        if (isOrgUnit && !allInsertedIds.isEmpty()) {
+            if (orgunitgroupid != null) {
+                // Legacy: assign all org units to the single provided group
+                log.debug("Assigning all {} org units to provided group {}", allInsertedIds.size(), orgunitgroupid);
+                insertOrgUnitGroupMemberships(orgunitgroupid, allInsertedIds);
+            } else {
+                // Auto: create one org unit group per hierarchy level and assign accordingly
+                log.info("Auto-creating {} org unit groups (one per hierarchy level)", orgUnitsByLevel.size());
+                insertAutoOrgUnitGroupsPerLevel(orgUnitsByLevel);
+            }
         }
 
-        return totalInserted;
+        return new HierarchyResult(totalInserted, orgUnitsByLevel);
     }
 
     private void insertOrgUnitGroupMemberships(Long orgunitgroupid, List<Object> orgUnitIds) throws SQLException {
@@ -189,6 +198,74 @@ public class HierarchyInsertService {
         }
     }
 
+    private void insertAutoOrgUnitGroupsPerLevel(List<List<Object>> orgUnitsByLevel) throws SQLException {
+        TableMetadata groupTable = schemaService.getTable("orgunitgroup");
+        if (groupTable == null) {
+            log.warn("orgunitgroup table not found — skipping auto org unit group creation");
+            return;
+        }
+
+        List<ColumnMetadata> groupColumns = groupTable.getInsertableColumns();
+        String groupInsertSql = buildInsertSql("orgunitgroup", groupColumns, null);
+        String memberInsertSql = "INSERT INTO orgunitgroupmembers (orgunitgroupid, organisationunitid) VALUES (?, ?)";
+
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                long nextGroupId = getMaxPk(conn, "orgunitgroup", "orgunitgroupid") + 1;
+
+                for (int level = 0; level < orgUnitsByLevel.size(); level++) {
+                    long groupId = nextGroupId + level;
+                    List<Object> levelOrgUnitIds = orgUnitsByLevel.get(level);
+
+                    Map<String, Object> groupRow = dataGenerator.generateRow(groupTable);
+                    groupRow.put("orgunitgroupid", groupId);
+                    groupRow.put("name", "Level-" + (level + 1) + "-Group-" + generateRandomSuffix());
+
+                    try (PreparedStatement groupPs = conn.prepareStatement(groupInsertSql)) {
+                        setParameters(groupPs, groupColumns, groupRow);
+                        groupPs.executeUpdate();
+                    }
+
+                    try (PreparedStatement memberPs = conn.prepareStatement(memberInsertSql)) {
+                        int batchCount = 0;
+                        for (Object orgUnitId : levelOrgUnitIds) {
+                            memberPs.setLong(1, groupId);
+                            memberPs.setLong(2, ((Number) orgUnitId).longValue());
+                            memberPs.addBatch();
+                            batchCount++;
+
+                            if (batchCount % 1000 == 0) {
+                                memberPs.executeBatch();
+                                memberPs.clearBatch();
+                            }
+                        }
+                        if (batchCount % 1000 != 0) {
+                            memberPs.executeBatch();
+                        }
+                    }
+
+                    conn.commit();
+                    log.info("Created org unit group {} (level {}) with {} members",
+                        groupId, level + 1, levelOrgUnitIds.size());
+                }
+            } catch (SQLException e) {
+                conn.rollback();
+                log.error("Auto org unit group creation failed, rolling back", e);
+                throw e;
+            }
+        }
+    }
+
+    private long getMaxPk(Connection conn, String table, String pkColumn) throws SQLException {
+        String sql = "SELECT COALESCE(MAX(" + pkColumn + "), 0) FROM " + table;
+        try (PreparedStatement ps = conn.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) return rs.getLong(1);
+            return 0;
+        }
+    }
+
     private void addColumnIfMissing(List<ColumnMetadata> columnsToInsert, TableMetadata table, String columnName) {
         boolean alreadyPresent = columnsToInsert.stream()
             .anyMatch(c -> c.name().equalsIgnoreCase(columnName));
@@ -221,7 +298,7 @@ public class HierarchyInsertService {
                 // Override parent column value
                 row.put(parentColumn, parentId);
 
-                // For organisationunit, set path and hierarchylevel
+                // For organisationunit, set path, hierarchylevel, and openingdate
                 String currentPath = null;
                 if (isOrgUnit) {
                     String uid = (String) row.get("uid");
@@ -232,6 +309,7 @@ public class HierarchyInsertService {
                     }
                     row.put("path", currentPath);
                     row.put("hierarchylevel", hierarchyLevel);
+                    row.put("openingdate", Timestamp.valueOf("2024-01-01 00:00:00"));
                     batchPaths.add(currentPath);
                 }
 
@@ -342,6 +420,17 @@ public class HierarchyInsertService {
             ps.setObject(index, value);
         }
     }
+
+    private String generateRandomSuffix() {
+        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        StringBuilder sb = new StringBuilder(6);
+        for (int i = 0; i < 6; i++) {
+            sb.append(chars.charAt(java.util.concurrent.ThreadLocalRandom.current().nextInt(chars.length())));
+        }
+        return sb.toString();
+    }
+
+    public record HierarchyResult(int totalInserted, List<List<Object>> orgUnitsByLevel) {}
 
     @FunctionalInterface
     public interface ProgressCallback {
