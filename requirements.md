@@ -1,6 +1,6 @@
 # DB Populator Service
 ## What is it
-The DB Populator service is a backend service written in Java. It's function is to populate a DHIS2 Postgres DB with entries.
+The DB Populator service is a backend service written in Java. Its function is to populate a DHIS2 Postgres DB with entries.
 
 ## Requirements
 - The service should be able to detect the DB schema with the given the JDBC connection details
