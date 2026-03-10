@@ -220,7 +220,7 @@ public class HierarchyInsertService {
 
                     Map<String, Object> groupRow = dataGenerator.generateRow(groupTable);
                     groupRow.put("orgunitgroupid", groupId);
-                    groupRow.put("name", "Level-" + (level + 1) + "-Group-" + generateRandomSuffix());
+                    groupRow.put("name", "Level-" + (level + 1) + "-Group-" + dataGenerator.generateRandomSuffix());
 
                     try (PreparedStatement groupPs = conn.prepareStatement(groupInsertSql)) {
                         setParameters(groupPs, groupColumns, groupRow);
@@ -419,15 +419,6 @@ public class HierarchyInsertService {
         } else {
             ps.setObject(index, value);
         }
-    }
-
-    private String generateRandomSuffix() {
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        StringBuilder sb = new StringBuilder(6);
-        for (int i = 0; i < 6; i++) {
-            sb.append(chars.charAt(java.util.concurrent.ThreadLocalRandom.current().nextInt(chars.length())));
-        }
-        return sb.toString();
     }
 
     public record HierarchyResult(int totalInserted, List<List<Object>> orgUnitsByLevel) {}

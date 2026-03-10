@@ -24,7 +24,6 @@ public class DataGeneratorService {
 
     private final DataSource dataSource;
     private final PrimaryKeyGeneratorService pkGenerator;
-    private final Map<String, Set<Object>> uniqueValuesTracker = new ConcurrentHashMap<>();
     private final Map<String, List<Object>> foreignKeyCache = new ConcurrentHashMap<>();
 
     private static final String CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -298,24 +297,11 @@ public class DataGeneratorService {
         foreignKeyCache.clear();
     }
 
-    public void trackUniqueColumn(String tableName, String columnName) {
-        String key = tableName + "." + columnName;
-        uniqueValuesTracker.putIfAbsent(key, ConcurrentHashMap.newKeySet());
-    }
-
-    private boolean isTrackedUnique(String key) {
-        return uniqueValuesTracker.containsKey(key);
-    }
-
-    private boolean trackUniqueValue(String key, Object value) {
-        Set<Object> values = uniqueValuesTracker.get(key);
-        if (values == null) {
-            return true;
+    public String generateRandomSuffix() {
+        StringBuilder sb = new StringBuilder(8);
+        for (int i = 0; i < 8; i++) {
+            sb.append(CHARS.charAt(ThreadLocalRandom.current().nextInt(CHARS.length())));
         }
-        return values.add(value);
-    }
-
-    public void clearUniqueTracking() {
-        uniqueValuesTracker.clear();
+        return sb.toString();
     }
 }

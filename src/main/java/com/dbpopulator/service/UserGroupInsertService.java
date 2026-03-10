@@ -54,13 +54,14 @@ public class UserGroupInsertService {
                     for (int i = 0; i < amount; i++) {
                         Map<String, Object> row = dataGenerator.generateRow(table);
                         row.put("usergroupid", nextId + i);
-                        row.put("name", "Group-" + generateRandomSuffix());
+                        row.put("name", "Group-" + dataGenerator.generateRandomSuffix());
 
                         setParameters(ps, columns, row);
                         ps.addBatch();
 
                         if ((i + 1) % BATCH_SIZE == 0) {
-                            ps.executeBatch(); ps.clearBatch();
+                            ps.executeBatch();
+                            ps.clearBatch();
                             conn.commit();
                             inserted = i + 1;
                             if (callback != null) callback.onProgress(inserted);
@@ -132,15 +133,6 @@ public class UserGroupInsertService {
         else if (value instanceof Timestamp ts) ps.setTimestamp(index, ts);
         else if (value instanceof byte[] bytes) ps.setBytes(index, bytes);
         else ps.setObject(index, value);
-    }
-
-    private String generateRandomSuffix() {
-        String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-        StringBuilder sb = new StringBuilder(8);
-        for (int i = 0; i < 8; i++) {
-            sb.append(chars.charAt(ThreadLocalRandom.current().nextInt(chars.length())));
-        }
-        return sb.toString();
     }
 
     @FunctionalInterface

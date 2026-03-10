@@ -1,5 +1,7 @@
 # DB Populator
 
+100% AI-generated App.
+Solely to insert large amounts of data to a DHS2 DB, for performance testing. 
 A Java 17 Spring Boot service for bulk-populating a DHIS2 PostgreSQL database with generated test data. All operations are async — requests return a job ID immediately, and progress can be tracked via the status endpoint.
 
 ## Prerequisites

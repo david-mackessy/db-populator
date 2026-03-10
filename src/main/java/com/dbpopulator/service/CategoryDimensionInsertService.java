@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class CategoryDimensionInsertService {
@@ -16,7 +16,6 @@ public class CategoryDimensionInsertService {
     private static final int BATCH_SIZE = 1000;
 
     private final DataSource dataSource;
-    private final Random random = new Random();
 
     public CategoryDimensionInsertService(DataSource dataSource) {
         this.dataSource = dataSource;
@@ -45,7 +44,7 @@ public class CategoryDimensionInsertService {
                 try (PreparedStatement ps = conn.prepareStatement(sql)) {
                     for (int i = 0; i < amount; i++) {
                         long pkValue = nextPkValue + i;
-                        long categoryId = categoryIds.get(random.nextInt(categoryIds.size()));
+                        long categoryId = categoryIds.get(ThreadLocalRandom.current().nextInt(categoryIds.size()));
 
                         ps.setLong(1, pkValue);
                         ps.setLong(2, categoryId);
