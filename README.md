@@ -316,7 +316,36 @@ Sub-requests execute in order, making this useful for building up dependent data
 
 ## How to Add a New Request Type
 
-See [`CLAUDE.md`](CLAUDE.md) for the full developer guide. The short version:
+### Using the Claude Code custom command (recommended)
+
+This repo includes a [Claude Code](https://claude.ai/code) custom command that guides you through adding a new request type end-to-end:
+
+```
+/add-new-request <type>
+```
+
+For example:
+
+```
+/add-new-request indicator
+```
+
+The command walks through 10 steps interactively:
+
+1. **Discover the target table** — confirms the exact table name in the schema
+2. **Discover required columns** — identifies which columns `generateRow()` can't auto-fill (enums, caller-supplied FK IDs, business-logic constraints) and asks clarifying questions
+3. **Discover related tables** — identifies join tables, child records, or parent IDs that should be part of the operation
+4. **Design the request shape** — proposes a JSON request body and asks you to confirm before writing any code
+5. **`PopulateRequest.java`** — adds fields, `isXxx()`, `hasXxx()`, and `resolvedXxx()` helpers
+6. **`XxxInsertService.java`** — creates the insert service using schema-driven column discovery and the max-PK ID pattern
+7. **`PopulatorService.java`** — adds routing and a `startXxxJob()` method
+8. **`AsyncJobExecutor.java`** — injects the new service and adds the `@Async` executor method
+9. **`PopulatorController.java`** — adds the type to `isSpecializedType` if needed
+10. **Test** — compiles and provides a `curl` command to verify the new type end-to-end
+
+### Manual steps
+
+If you prefer to implement manually, see [`CLAUDE.md`](CLAUDE.md) for the full developer guide. The short version:
 
 1. **`PopulateRequest.java`** — add new fields and `isXxx()` / `hasXxx()` helper methods
 2. **Create `XxxInsertService.java`** — implement batch insert logic using `SchemaDetectionService` for column discovery and the max-PK pattern for ID generation
