@@ -41,6 +41,17 @@ Poll the `statusUrl` to track progress.
 
 ---
 
+## Verify New Request Type
+Once a new request type is added (e.g. category):
+1. try an insert of new data for that type
+2. retrieve one of the new UIDs in the table
+3. start-up the DHIS2 server, pointing to the relevant DB
+4. call the relevant DHIS2 API (e.g. `/api/categories/{uid}`) to see if it handles retrieving the record from the DB
+
+This gives some confidence that data inserted can actually flow through the DHIS2 system which is in important to find out before using in your desired use case.
+
+---
+
 ## Available Request Types
 
 ### 1. Generic Flat Insert
